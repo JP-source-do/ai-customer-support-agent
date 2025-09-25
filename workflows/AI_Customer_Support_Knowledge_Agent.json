@@ -1,0 +1,613 @@
+{
+  "name": "AI_Customer_Support_Knowledge_Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "🔥 GROUP 1: CUSTOMER INTAKE\nNodes: Webhook_Customer_Input\nPurpose: Receives customer questions via webhook API endpoint\nFunction:\n\nAccepts POST requests at /customer-support endpoint\nValidates incoming JSON payload with customer questions\nTriggers the entire support workflow",
+        "height": 208,
+        "width": 406
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1136,
+        -208
+      ],
+      "id": "595b0b82-2828-4a9b-9d47-6e594adca7fd",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check if this is a fallback response\nif ($json.fallback_response === true) {\n  const originalQuestion = $node[\"Format_Filtered_Data\"].json.question || \"Question not found\";\n  \n  return [{\n    json: {\n      answer: \"I'm experiencing technical difficulties connecting to our AI service. A human support representative will assist you shortly.\",\n      confidence_score: 0,\n      sources: [],\n      question: originalQuestion,\n      system_error: true\n    }\n  }];\n}\n\n// Normal parsing logic with enhanced error handling\nconst rawContent = $json.choices?.[0]?.message?.content;\n\nif (!rawContent) {\n  const originalQuestion = $node[\"Format_Filtered_Data\"].json.question || \"Question not found\";\n  \n  return [{\n    json: {\n      answer: null,\n      confidence_score: 0,\n      sources: [],\n      question: originalQuestion,\n      parsing_error: true\n    }\n  }];\n}\n\nconst originalQuestion = $node[\"Format_Filtered_Data\"].json.question \n  || $node[\"Filter_Relevant_Articles\"].json.question \n  || $node[\"Webhook_Customer_Input\"].json.body?.question \n  || \"Question not found\";\n\nlet parsed = {};\ntry {\n  parsed = JSON.parse(rawContent);\n  \n  if (parsed.answer === null || parsed.answer === undefined) {\n    parsed.confidence_score = 0;\n    parsed.sources = [];\n  }\n  \n} catch (e) {\n  console.log(\"JSON parsing failed:\", e.message);\n  parsed = {\n    answer: null,\n    confidence_score: 0,\n    sources: [],\n    parsing_error: true\n  };\n}\n\nparsed.question = originalQuestion;\n\nreturn [{\n  json: parsed\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        992,
+        0
+      ],
+      "id": "eda0b14d-6ab0-4c8a-af52-c50e10b9e698",
+      "name": "Code_Parse_LLM"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "/customer-support",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -976,
+        0
+      ],
+      "id": "3133bbdf-017e-4668-a516-f2b319892402",
+      "name": "Webhook_Customer_Input",
+      "webhookId": "2a4dd51e-d531-4be8-9cd0-60d2887582c3"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1v5RG14qZpF6lXCvEEdW5GfIWMVvEeYZoXw5WPir-cXA",
+          "mode": "list",
+          "cachedResultName": "knowledge-base",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1v5RG14qZpF6lXCvEEdW5GfIWMVvEeYZoXw5WPir-cXA/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 85299858,
+          "mode": "list",
+          "cachedResultName": "knowledge-base",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1v5RG14qZpF6lXCvEEdW5GfIWMVvEeYZoXw5WPir-cXA/edit#gid=85299858"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -544,
+        0
+      ],
+      "id": "0e980ae6-ccb8-4551-800a-17f2257fc3d7",
+      "name": "Sheets_Fetch_Knowledge_Base",
+      "retryOnFail": false,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "4e5Z1VyMUZyEvBHo",
+          "name": "Google Sheets account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the customer's question - now from our error handler\nconst customerQuestion = ($json.question || \"\").toLowerCase();\n\n// Get KB rows - handle both normal and fallback modes\nconst kbRows = $json.relevantEntries || [];\n\n// If we're in fallback mode, return empty (triggers escalation)\nif ($json.fallback_mode === true || kbRows.length === 0) {\n  return [{\n    json: {\n      question: customerQuestion,\n      relevantEntries: [],\n      fallback_triggered: true\n    }\n  }];\n}\n\n// Normal filtering logic (unchanged)\nconst relevantEntries = kbRows\n  .filter(entry => {\n    const title = (entry.title || \"\").toLowerCase();\n    const content = (entry.content || \"\").toLowerCase();\n\n    return (\n      (customerQuestion.includes(\"password\") && (title.includes(\"password\") || content.includes(\"password\"))) ||\n      (customerQuestion.includes(\"billing\") && (title.includes(\"billing\") || content.includes(\"billing\"))) ||\n      (customerQuestion.includes(\"subscription\") && (title.includes(\"subscription\") || content.includes(\"subscription\"))) ||\n      (customerQuestion.includes(\"refund\") && (title.includes(\"refund\") || content.includes(\"refund\"))) ||\n      (customerQuestion.includes(\"authentication\") && (title.includes(\"authentication\") || content.includes(\"authentication\")))\n    );\n  });\n\n// Return results\nconst finalEntries = relevantEntries.length > 0 ? relevantEntries : kbRows;\n\nreturn [{\n  json: {\n    question: customerQuestion,\n    relevantEntries: finalEntries,\n    fallback_triggered: false\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -144,
+        0
+      ],
+      "id": "8d317a59-3dd3-4e1b-9352-186a739831e5",
+      "name": "Filter_Relevant_Articles"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "36c412e7-d0a1-4e53-b530-0726b9e528fa",
+              "name": "question",
+              "value": "={{$json[\"question\"]}}",
+              "type": "string"
+            },
+            {
+              "id": "e884259e-1b03-422f-9fdd-d1befaface33",
+              "name": "relevantEntries",
+              "value": "={{$json[\"relevantEntries\"]}}",
+              "type": "array"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        144,
+        0
+      ],
+      "id": "cb9213ef-ec1f-43bc-bdfa-0089088947c2",
+      "name": "Format_Filtered_Data"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the question and relevant entries from the previous node\nconst question = $json.question || \"\";\nconst relevantEntries = $json.relevantEntries || [];\n\n// Build the knowledge base content string\nconst kbContent = relevantEntries.length > 0\n  ? relevantEntries\n      .map(entry => `ID: ${entry.id}, Title: ${entry.title}, Content: ${entry.content}`)\n      .join(\"\\n\")\n  : \"No relevant entries found.\";\n\n// Create the request body for the LLM\nconst requestBody = {\n  model: \"gpt-3.5-turbo\",\n  messages: [\n    {\n      role: \"system\",\n      content: `You are a helpful customer support assistant.\nYou MUST ONLY answer using the provided knowledge base entries.\nIf the customer question is not answered in the knowledge base, respond strictly with:\n{\n  \"answer\": null,\n  \"confidence_score\": 0,\n  \"sources\": []\n}\n\nIf you can answer from the knowledge base, respond with:\n{\n  \"answer\": \"[your detailed answer]\",\n  \"confidence_score\": [0.1 to 1.0 based on how well the KB answers the question],\n  \"sources\": [\"ID: [entry_id], Title: [entry_title]\"]\n}\n\nDo NOT make up answers. ALWAYS respond with valid JSON.`\n    },\n    {\n      role: \"user\",\n      content: `Knowledge Base Entries:\n${kbContent}\n\nCustomer Question: ${question}`\n    }\n  ],\n  temperature: 0\n};\n\n// Return the properly structured output\nreturn [{\n  json: {\n    requestBody: requestBody\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        496,
+        0
+      ],
+      "id": "189076d0-4da9-4a26-b181-74d28f3045ba",
+      "name": "Build_LLM_Request"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer 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"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "body": "={{ JSON.stringify($json.requestBody) }}\n",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        736,
+        0
+      ],
+      "id": "1b7412bc-be08-4b51-b021-c47399f55479",
+      "name": "Send_To_OpenRouter",
+      "retryOnFail": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "2ab012f6-0565-4ceb-9f98-8a5db4507f16",
+              "leftValue": "={{ ($json[\"relevantEntries\"] || []).length }}\n",
+              "rightValue": "0",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            },
+            {
+              "id": "74fee003-6770-45ab-87da-df195ff49713",
+              "leftValue": "={{ $json[\"confidence_score\"] }}",
+              "rightValue": 0.5,
+              "operator": {
+                "type": "number",
+                "operation": "lte"
+              }
+            },
+            {
+              "id": "6ad616e7-5385-4f2e-9e85-a059d1c9e1da",
+              "leftValue": "={{ ($json.system_error || false).toString() }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1328,
+        0
+      ],
+      "id": "3e1fd76a-763e-4162-9903-a9665988fe51",
+      "name": "Evaluate_Response_Quality"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "C09DS1GTS1H",
+          "mode": "list",
+          "cachedResultName": "all-test"
+        },
+        "text": "=🚨 Customer support escalation needed 🚨\n\n❓ Question: {{$json[\"question\"]}}\n💡 Proposed Answer: {{$json[\"answer\"]}}\n📊 Confidence: {{$json[\"confidence_score\"]}}",
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        1840,
+        -272
+      ],
+      "id": "5d0a5a77-894e-40be-9a22-4d8c139f1382",
+      "name": "Notify_Support_Team",
+      "webhookId": "7fc8c0d9-854b-4368-b8a3-f51cd2bfe1cb",
+      "credentials": {
+        "slackApi": {
+          "id": "OoHbU0vIN339I6bp",
+          "name": "Slack account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the original question\nconst question = $json.question || \"Question not found\";\n\n// Check if we have a valid answer or if this is an escalation case\nconst hasValidAnswer = $json.answer !== null && $json.answer !== undefined && $json.confidence_score > 0.5;\n\nif (hasValidAnswer) {\n  // Return the normal response\n  return [{\n    json: {\n      answer: $json.answer,\n      confidence_score: $json.confidence_score,\n      sources: $json.sources || [],\n      question: question\n    }\n  }];\n} else {\n  // Return the \"no relevant sources\" message\n  return [{\n    json: {\n      answer: \"I don't find any relevant sources to your question. Our support team has been notified.\",\n      confidence_score: 0,\n      sources: [],\n      question: question\n    }\n  }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2576,
+        -192
+      ],
+      "id": "7ee64d38-9e43-4831-93e3-f2cf568f2884",
+      "name": "Format_Customer_Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Return the \"no relevant sources\" message for escalated cases\nreturn [{\n  json: {\n    answer: \"I don't find any relevant sources to your question. Our support team has been notified.\",\n    confidence_score: 0,\n    sources: [],\n    question: $json.question || \"Question not available\"\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2192,
+        -272
+      ],
+      "id": "4828a6ed-c21a-4e80-9fe4-24de8a890b41",
+      "name": "Format_Escalated_Response"
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        2576,
+        -16
+      ],
+      "id": "5888cc9a-f04c-4950-b943-b92e8c93fd19",
+      "name": "Deliver_Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check if the previous node failed\nconst sheetsData = $input.all();\n\n// If no data or error occurred\nif (!sheetsData || sheetsData.length === 0 || sheetsData[0].error) {\n  console.log(\"Google Sheets API failed - using fallback mode\");\n  \n  return [{\n    json: {\n      question: $node[\"Webhook_Customer_Input\"].json.body.question || \"\",\n      relevantEntries: [], // Empty array forces escalation path\n      error_source: \"SHEETS_API_FAILURE\",\n      fallback_mode: true\n    }\n  }];\n}\n\n// If successful, pass data through unchanged\nreturn [{\n  json: {\n    question: $node[\"Webhook_Customer_Input\"].json.body.question || \"\",\n    relevantEntries: sheetsData.map(item => item.json),\n    error_source: null,\n    fallback_mode: false\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -544,
+        192
+      ],
+      "id": "37a49214-5e52-4781-9afb-ea2f6d25764a",
+      "name": "Handle_Sheets_Error",
+      "retryOnFail": false
+    },
+    {
+      "parameters": {
+        "jsCode": "const inputData = $input.all();\n\n// Check if OpenRouter request failed\nif (!inputData || inputData.length === 0 || inputData[0].error) {\n  console.log(\"OpenRouter API failed - generating fallback response\");\n  \n  // Get original question for fallback response\n  const originalQuestion = $node[\"Format_Filtered_Data\"].json.question || \"Question not available\";\n  \n  // Create fallback AI response structure that matches expected format\n  return [{\n    json: {\n      choices: [{\n        message: {\n          content: JSON.stringify({\n            answer: \"I'm experiencing technical difficulties connecting to our AI service. A human support representative will assist you shortly.\",\n            confidence_score: 0,\n            sources: []\n          })\n        }\n      }],\n      error_type: \"OPENROUTER_FAILURE\",\n      fallback_response: true\n    }\n  }];\n}\n\n// If successful, pass through unchanged\nreturn inputData;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        736,
+        176
+      ],
+      "id": "1dea0889-8a76-461e-9d46-9bc79bde02b0",
+      "name": "Handle_OpenRouter_Error"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log Slack failures (in production, this would go to your logging system)\nconst inputData = $input.all();\n\nif (!inputData || inputData.length === 0 || inputData[0].error) {\n  console.error(\"CRITICAL: Slack notification failed!\", {\n    timestamp: new Date().toISOString(),\n    question: $json.question,\n    confidence: $json.confidence_score,\n    error: \"SLACK_API_FAILURE\"\n  });\n  \n  // Still proceed with customer response\n  return [{\n    json: {\n      answer: \"I don't find any relevant sources to your question. Our support team has been notified.\",\n      confidence_score: 0,\n      sources: [],\n      question: $json.question || \"Question not available\",\n      escalation_logged: false,\n      slack_failed: true\n    }\n  }];\n}\n\n// Slack succeeded, proceed normally\nreturn [{\n  json: {\n    answer: \"I don't find any relevant sources to your question. Our support team has been notified.\",\n    confidence_score: 0,\n    sources: [],\n    question: $json.question || \"Question not available\",\n    escalation_logged: true,\n    slack_failed: false\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        -272
+      ],
+      "id": "8c51f4ff-2cf4-40de-8930-7a20c0530c3e",
+      "name": "Log_Slack_Failure"
+    },
+    {
+      "parameters": {
+        "content": "📚 GROUP 2: KNOWLEDGE BASE RETRIEVAL\nNodes: Sheets_Fetch_Knowledge_Base, Handle_Sheets_Error\nPurpose: Fetches all knowledge base articles from Google Sheets with error handling\nFunction:\n\nConnects to Google Sheets containing support articles\nImplements fallback mode when Sheets API fails\nEnsures workflow continues even with KB unavailability",
+        "height": 208,
+        "width": 406
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -688,
+        -208
+      ],
+      "id": "2e1c7bf9-055e-495b-858e-983a218a0ffc",
+      "name": "Sticky Note7"
+    },
+    {
+      "parameters": {
+        "content": "🔍 GROUP 3: CONTENT FILTERING & MATCHING\nNodes: Filter_Relevant_Articles, Format_Filtered_Data\nPurpose: Filters relevant KB articles based on customer question keywords\nFunction:\n\nAnalyzes customer question for keywords (password, billing, subscription, etc.)\nMatches against knowledge base content\nStructures data for AI processing\nHandles fallback scenarios when no matches found",
+        "height": 208,
+        "width": 534
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        -208
+      ],
+      "id": "9bdfd7ff-35af-458b-8135-926091cbdb98",
+      "name": "Sticky Note8"
+    },
+    {
+      "parameters": {
+        "content": "🤖 GROUP 4: AI RESPONSE GENERATION\nNodes: Build_LLM_Request, Send_To_OpenRouter, Handle_OpenRouter_Error, Code_Parse_LLM\nPurpose: Prepares LLM request, sends to OpenRouter, and parses AI response\nFunction:\n\nConstructs structured prompts with KB context\nSends requests to OpenRouter API with 15-second timeout\nImplements comprehensive error handling for AI service failures\nParses JSON responses with fallback for parsing errors\nGenerates confidence scores and source citations",
+        "height": 208,
+        "width": 694
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        432,
+        -224
+      ],
+      "id": "36b8d44e-6189-4b34-9845-c33c0ee2d7aa",
+      "name": "Sticky Note9"
+    },
+    {
+      "parameters": {
+        "content": "⚡ GROUP 5: CONFIDENCE EVALUATION\nNodes: Evaluate_Response_Quality\nPurpose: Evaluates answer quality and routes to appropriate response path\nFunction:\n\nChecks multiple conditions (empty KB, low confidence, system errors)\nRoutes to escalation path when criteria met\nUses OR logic for comprehensive error detection",
+        "height": 208,
+        "width": 374
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        -224
+      ],
+      "id": "876e8547-daec-42fb-83a4-863a85676f3c",
+      "name": "Sticky Note10"
+    },
+    {
+      "parameters": {
+        "content": "🚨 GROUP 6: TEAM ESCALATION\nNodes: Notify_Support_Team, Log_Slack_Failure, Format_Escalated_Response\nPurpose: Notifies support team of questions requiring manual assistance\nFunction:\n\nSends structured alerts to Slack channel\nHandles Slack API failures gracefully\nFormats professional escalation responses\nLogs failures for operational monitoring",
+        "height": 208,
+        "width": 534
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1792,
+        -480
+      ],
+      "id": "f76f871c-5ef3-4e7f-a424-0057d1060cc1",
+      "name": "Sticky Note11"
+    },
+    {
+      "parameters": {
+        "content": "📤 GROUP 7: CUSTOMER RESPONSE DELIVERY\nNodes: Format_Customer_Response, Deliver_Response\nPurpose: Formats and delivers final response back to customer\nFunction:\n\nStructures responses with answer, confidence, sources\nHandles both successful and escalated responses\nReturns proper HTTP responses with JSON payload\nEnsures consistent response format",
+        "height": 208,
+        "width": 534
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2448,
+        -480
+      ],
+      "id": "1e15f532-ad8d-4122-b14a-013456c880a7",
+      "name": "Sticky Note12"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Code_Parse_LLM": {
+      "main": [
+        [
+          {
+            "node": "Evaluate_Response_Quality",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook_Customer_Input": {
+      "main": [
+        [
+          {
+            "node": "Sheets_Fetch_Knowledge_Base",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets_Fetch_Knowledge_Base": {
+      "main": [
+        [
+          {
+            "node": "Handle_Sheets_Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter_Relevant_Articles": {
+      "main": [
+        [
+          {
+            "node": "Format_Filtered_Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format_Filtered_Data": {
+      "main": [
+        [
+          {
+            "node": "Build_LLM_Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build_LLM_Request": {
+      "main": [
+        [
+          {
+            "node": "Send_To_OpenRouter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send_To_OpenRouter": {
+      "main": [
+        [
+          {
+            "node": "Handle_OpenRouter_Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate_Response_Quality": {
+      "main": [
+        [
+          {
+            "node": "Notify_Support_Team",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format_Customer_Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify_Support_Team": {
+      "main": [
+        [
+          {
+            "node": "Log_Slack_Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format_Customer_Response": {
+      "main": [
+        [
+          {
+            "node": "Deliver_Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format_Escalated_Response": {
+      "main": [
+        [
+          {
+            "node": "Deliver_Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle_Sheets_Error": {
+      "main": [
+        [
+          {
+            "node": "Filter_Relevant_Articles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle_OpenRouter_Error": {
+      "main": [
+        [
+          {
+            "node": "Code_Parse_LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log_Slack_Failure": {
+      "main": [
+        [
+          {
+            "node": "Format_Escalated_Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "13d1f1d2-37fe-4e62-a7f4-c420e43e9851",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "66dfa476311d24c8f51ce7bf40be15177e6e9aca71485c23cbba9a6e5749c89b"
+  },
+  "id": "bAXtRrYSRfzYas6A",
+  "tags": []
+}
