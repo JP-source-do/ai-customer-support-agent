@@ -146,7 +146,7 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "Bearer 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"
+              "value": "Bearer open-router API"
             },
             {
               "name": "Content-Type",
